@@ -1,29 +1,23 @@
 export async function POST(req) {
   const { goalName, checkinText, lang } = await req.json();
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 300,
-      messages: [
-        {
-          role: "user",
-          content: `Пользователь работает над целью "${goalName}". Отчёт за сегодня: "${checkinText}". Ответь ТОЛЬКО в JSON без markdown: {"score": число 1-5, "comment": "короткий тёплый комментарий на языке ${
-            lang === "ru" ? "русском" : "английском"
-          }, 1-2 предложения"}`,
-        },
-      ],
-    }),
-  });
+  const prompt = `Пользователь работает над целью "${goalName}". Отчёт за сегодня: "${checkinText}". Ответь ТОЛЬКО в JSON без markdown и без обратных кавычек: {"score": число 1-5, "comment": "короткий тёплый комментарий на языке ${
+    lang === "ru" ? "русском" : "английском"
+  }, 1-2 предложения"}`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    }
+  );
 
   const data = await response.json();
-  const text = data.content?.map((c) => c.text || "").join("") || "{}";
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
   const clean = text.replace(/```json|```/g, "").trim();
 
   try {
