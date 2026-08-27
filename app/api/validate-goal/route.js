@@ -14,25 +14,42 @@ export async function POST(req) {
     lang === "ru" ? "русском" : "английском"
   }, почему цель не подходит; если valid=true — пустая строка"}`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    }
-  );
-
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-
   try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    // Если Gemini вернул ошибку (неверный ключ, лимит, недоступная модель и т.п.) —
+    // логируем и пропускаем цель, а не блокируем пользователя молча.
+    if (!response.ok || data.error) {
+      console.error("Gemini API error (validate-goal):", response.status, data.error || data);
+      return Response.json({ valid: true, reason: "" });
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const clean = text.replace(/```json|```/g, "").trim();
+
     const parsed = JSON.parse(clean);
+
+    // Защита: если модель вернула JSON без поля valid (или не boolean) —
+    // не считаем это отказом, пропускаем цель.
+    if (typeof parsed.valid !== "boolean") {
+      return Response.json({ valid: true, reason: "" });
+    }
+
     return Response.json(parsed);
   } catch (e) {
+    console.error("validate-goal route failed:", e);
+    // Любая техническая ошибка (сеть, парсинг и т.п.) — пропускаем цель, а не блокируем.
     return Response.json({ valid: true, reason: "" });
   }
 }
