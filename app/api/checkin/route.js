@@ -1,9 +1,13 @@
 export async function POST(req) {
   const { goalName, checkinText, lang } = await req.json();
 
-  const prompt = `Пользователь работает над целью "${goalName}". Отчёт за сегодня: "${checkinText}". Ответь ТОЛЬКО в JSON без markdown и без обратных кавычек: {"score": число 1-5, "comment": "короткий тёплый комментарий на языке ${
+  const prompt = `Пользователь работает над целью "${goalName}". Отчёт за сегодня: "${checkinText}".
+
+Сначала определи: этот отчёт реально относится к указанной цели (не полная бессмыслица, не про что-то совсем другое, не пустой набор символов)?
+
+Ответь ТОЛЬКО в JSON без markdown и без обратных кавычек: {"relevant": true или false, "score": число 1-5 (если relevant=false, ставь 0), "comment": "если relevant=true — короткий тёплый комментарий на языке ${
     lang === "ru" ? "русском" : "английском"
-  }, 1-2 предложения"}`;
+  }, 1-2 предложения; если relevant=false — вежливо объясни, что запись не похожа на прогресс по цели '${goalName}', и попроси написать, что реально было сделано"}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -22,8 +26,9 @@ export async function POST(req) {
 
   try {
     const parsed = JSON.parse(clean);
+    if (typeof parsed.relevant !== "boolean") parsed.relevant = true;
     return Response.json(parsed);
   } catch (e) {
-    return Response.json({ score: 3, comment: "Отмечено." });
+    return Response.json({ relevant: true, score: 3, comment: "Отмечено." });
   }
 }
