@@ -215,10 +215,29 @@ export default function Page() {
   const skipSignIn = () => { const u = { name: t("guest"), email: "" }; setUser(u); save("user", u); setStage("hook"); };
   const signOut = () => { setUser(null); setGoals([]); setActiveGoalId(null); save("user", null); save("goals", []); save("achievements", []); setStage("signin"); };
 
-  const createGoal = (name) => {
+  const [goalValidating, setGoalValidating] = useState(false);
+  const [goalError, setGoalError] = useState(null);
+
+  const createGoal = async (name) => {
+    setGoalValidating(true); setGoalError(null);
+    try {
+      const res = await fetch("/api/validate-goal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goalName: name, lang: "ru" }),
+      });
+      const { valid, reason } = await res.json();
+      if (!valid) {
+        setGoalError(reason || "Эта цель не подходит, попробуй сформулировать иначе.");
+        setGoalValidating(false);
+        return;
+      }
+    } catch (e) {
+      // if validation call fails, allow through rather than blocking the user
+    }
     const g = { id: Date.now().toString(), name, createdAt: Date.now(), entries: [], report: null };
     const newGoals = [...goals, g];
     setGoals(newGoals); save("goals", newGoals); setActiveGoalId(g.id); setAddingGoal(false); setGoalInput("");
+    setGoalValidating(false);
     if (stage !== "app") setStage("app");
   };
 
@@ -255,6 +274,11 @@ export default function Page() {
         body: JSON.stringify({ goalName: activeGoal.name, checkinText: checkin, lang: "ru" }),
       });
       const parsed = await res.json();
+      if (parsed.relevant === false) {
+        setError(parsed.comment || "Эта запись не похожа на прогресс по цели. Опиши, что реально было сделано.");
+        setLoading(false);
+        return;
+      }
       const newEntries = [...activeGoal.entries, { date: Date.now(), text: checkin, score: parsed.score }];
       const newGoals = goals.map((g) => (g.id === activeGoal.id ? { ...g, entries: newEntries } : g));
       setGoals(newGoals); save("goals", newGoals); setFeedback(parsed.comment); setCheckin("");
@@ -331,8 +355,9 @@ export default function Page() {
           <div style={{ fontFamily: FONT_MONO, fontSize: 11, letterSpacing: 3, color: C.cyan, marginBottom: 14, textAlign: "center" }}>{t("setup")}</div>
           <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 22, textAlign: "center", marginBottom: 8 }}>{t("onboardTitle")}</h2>
           <p style={{ color: C.muted, fontSize: 13.5, textAlign: "center", marginBottom: 26 }}>{t("onboardBody")}</p>
-          <input className="gt-input" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder={t("goalPlaceholder")} style={{ width: "100%", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "13px 14px", color: C.text, fontSize: 15, fontFamily: FONT_BODY, marginBottom: 16 }} />
-          <Button disabled={!goalInput.trim()} onClick={() => goalInput.trim() && createGoal(goalInput.trim())}>{t("launch")}</Button>
+          <input className="gt-input" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder={t("goalPlaceholder")} style={{ width: "100%", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "13px 14px", color: C.text, fontSize: 15, fontFamily: FONT_BODY, marginBottom: 12 }} />
+          {goalError && <div style={{ color: C.danger, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>{goalError}</div>}
+          <Button disabled={!goalInput.trim() || goalValidating} onClick={() => goalInput.trim() && createGoal(goalInput.trim())}>{goalValidating ? "Проверяю…" : t("launch")}</Button>
         </div>
       </div>
     );
@@ -362,7 +387,8 @@ export default function Page() {
             <div className="gt-card" style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 18, boxShadow: PANEL_SHADOW }}>
               <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>{t("newGoalTitle")}</div>
               <input className="gt-input" autoFocus value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder={t("goalPlaceholder")} style={{ width: "100%", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", color: C.text, fontSize: 14, fontFamily: FONT_BODY, marginBottom: 10 }} />
-              <Button disabled={!goalInput.trim()} onClick={() => goalInput.trim() && createGoal(goalInput.trim())}>{t("launch")}</Button>
+              {goalError && <div style={{ color: C.danger, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>{goalError}</div>}
+              <Button disabled={!goalInput.trim() || goalValidating} onClick={() => goalInput.trim() && createGoal(goalInput.trim())}>{goalValidating ? "Проверяю…" : t("launch")}</Button>
             </div>
           )}
 
