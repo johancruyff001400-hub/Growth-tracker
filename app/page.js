@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo } from "react";
+import { LANGUAGES } from "./languages";
 
 const C = {
   bg: "#0a0e13", panel: "#11161d", panel2: "#151b23", border: "#232c36", borderBright: "#2f3d4a",
@@ -32,8 +33,22 @@ const STRINGS = {
     generatingReport: "AI анализирует твою неделю…", reportDate: "Отчёт от", newAchievement: "Новое достижение!",
   },
 };
+// Переводы для остальных 49 языков подгружаются из /public/locales.json
+// (генерируется скриптом scripts/generate-locales.mjs). Пока для языка нет
+// перевода (или файл не загрузился), используется английский, а если и его
+// нет — встроенный русский из STRINGS.ru, чтобы интерфейс не ломался.
+let ACTIVE_LANG = "ru";
+let ACTIVE_TRANSLATIONS = {};
+function setActiveLanguage(langCode, translationsDict) {
+  ACTIVE_LANG = langCode;
+  ACTIVE_TRANSLATIONS = translationsDict || {};
+}
 function t(key, vars) {
-  let s = STRINGS.ru[key] || key;
+  let s =
+    ACTIVE_TRANSLATIONS[ACTIVE_LANG]?.[key] ??
+    ACTIVE_TRANSLATIONS.en?.[key] ??
+    STRINGS.ru[key] ??
+    key;
   if (vars) Object.keys(vars).forEach((k) => (s = s.replace(`{${k}}`, vars[k])));
   return s;
 }
@@ -201,6 +216,14 @@ export default function Page() {
   const [error, setError] = useState(null);
   const [unlockedAch, setUnlockedAch] = useState([]);
   const [newBadge, setNewBadge] = useState(null);
+  const [lang, setLang] = useState("ru");
+  const [translations, setTranslations] = useState({});
+
+  // Каждый рендер синхронизируем модульные переменные t() с текущим состоянием.
+  setActiveLanguage(lang, translations);
+  const activeLangDef = LANGUAGES.find((l) => l.code === lang) || LANGUAGES[0];
+  const dateLocale = activeLangDef.locale;
+  const changeLang = (code) => { setLang(code); save("lang", code); };
 
   useEffect(() => {
     const g = load("goals", []);
@@ -209,7 +232,41 @@ export default function Page() {
     setGoals(g); setUser(u); setUnlockedAch(a);
     if (g.length) setActiveGoalId(g[0].id);
     if (!u) setStage("signin"); else if (!g.length) setStage("hook"); else setStage("app");
+
+    const savedLang = load("lang", null);
+    if (savedLang) {
+      setLang(savedLang);
+    } else if (typeof navigator !== "undefined") {
+      const browserLang = (navigator.language || "en").split("-")[0];
+      const supported = LANGUAGES.some((l) => l.code === browserLang);
+      setLang(supported ? browserLang : "en");
+    }
   }, []);
+
+  // Подгружаем перевод интерфейса для выбранного языка через AI (один раз на
+  // язык — дальше берём из кэша localStorage, чтобы не дёргать AI повторно).
+  useEffect(() => {
+    if (lang === "ru" || translations[lang]) return;
+    const cached = load(`locale_${lang}`, null);
+    if (cached) {
+      setTranslations((prev) => ({ ...prev, [lang]: cached }));
+      return;
+    }
+    const langDef = LANGUAGES.find((l) => l.code === lang);
+    fetch("/api/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ langName: langDef?.name || lang, strings: STRINGS.ru }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.translations) {
+          save(`locale_${lang}`, data.translations);
+          setTranslations((prev) => ({ ...prev, [lang]: data.translations }));
+        }
+      })
+      .catch(() => {});
+  }, [lang]);
 
   const mockGoogleSignIn = () => { const u = { name: "Alex", email: "alex@gmail.com" }; setUser(u); save("user", u); setStage("hook"); };
   const skipSignIn = () => { const u = { name: t("guest"), email: "" }; setUser(u); save("user", u); setStage("hook"); };
@@ -223,7 +280,7 @@ export default function Page() {
     try {
       const res = await fetch("/api/validate-goal", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goalName: name, lang: "ru" }),
+        body: JSON.stringify({ goalName: name, lang, langName: activeLangDef.name }),
       });
       const { valid, reason } = await res.json();
       if (!valid) {
@@ -271,7 +328,7 @@ export default function Page() {
     try {
       const res = await fetch("/api/checkin", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goalName: activeGoal.name, checkinText: checkin, lang: "ru" }),
+        body: JSON.stringify({ goalName: activeGoal.name, checkinText: checkin, lang, langName: activeLangDef.name }),
       });
       const parsed = await res.json();
       if (parsed.relevant === false) {
@@ -290,10 +347,10 @@ export default function Page() {
     setReportLoading(true); setError(null);
     try {
       const recent = activeGoal.entries.slice(-7);
-      const log = recent.map((e) => `- ${new Date(e.date).toLocaleDateString("ru-RU")}: ${e.text} (оценка ${e.score}/5)`).join("\n");
+      const log = recent.map((e) => `- ${new Date(e.date).toLocaleDateString(dateLocale)}: ${e.text} (оценка ${e.score}/5)`).join("\n");
       const res = await fetch("/api/report", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goalName: activeGoal.name, log, lang: "ru" }),
+        body: JSON.stringify({ goalName: activeGoal.name, log, lang, langName: activeLangDef.name }),
       });
       const { text } = await res.json();
       const report = { date: Date.now(), text };
@@ -421,7 +478,7 @@ export default function Page() {
                   <div style={{ fontSize: 13, color: C.muted }}>{t("generatingReport")}</div>
                 ) : activeGoal.report ? (
                   <>
-                    <div style={{ fontSize: 11, color: C.violet, fontFamily: FONT_MONO, marginBottom: 8 }}>{t("reportDate")} {new Date(activeGoal.report.date).toLocaleDateString("ru-RU")}</div>
+                    <div style={{ fontSize: 11, color: C.violet, fontFamily: FONT_MONO, marginBottom: 8 }}>{t("reportDate")} {new Date(activeGoal.report.date).toLocaleDateString(dateLocale)}</div>
                     <div style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 14 }}>{activeGoal.report.text}</div>
                     <Button variant="ghost" onClick={getWeeklyReport}>{t("getReport")}</Button>
                   </>
@@ -433,7 +490,7 @@ export default function Page() {
                   <div style={{ fontFamily: FONT_MONO, fontSize: 10, letterSpacing: 2, color: C.muted, marginBottom: 10 }}>{t("log")}</div>
                   {[...activeGoal.entries].reverse().slice(0, 6).map((e, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, color: C.muted, padding: "8px 0", borderBottom: i < 5 ? `1px solid ${C.border}` : "none" }}>
-                      <span style={{ fontFamily: FONT_MONO, fontSize: 11, flexShrink: 0, color: C.cyan }}>{new Date(e.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}</span>
+                      <span style={{ fontFamily: FONT_MONO, fontSize: 11, flexShrink: 0, color: C.cyan }}>{new Date(e.date).toLocaleDateString(dateLocale, { day: "2-digit", month: "2-digit" })}</span>
                       <span style={{ flex: 1, textAlign: "left" }}>{e.text.slice(0, 50)}{e.text.length > 50 ? "…" : ""}</span>
                     </div>
                   ))}
@@ -488,6 +545,17 @@ export default function Page() {
               <div style={{ width: 18, height: 18, borderRadius: "50%", background: C.bg, position: "absolute", top: 3, left: notif ? 21 : 3, transition: "left 0.2s" }} />
             </div>
           </div>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 10, letterSpacing: 2, color: C.muted, marginBottom: 8 }}>{t("settingsLang")}</div>
+          <select
+            value={lang}
+            onChange={(e) => changeLang(e.target.value)}
+            className="gt-input"
+            style={{ width: "100%", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", color: C.text, fontSize: 14, fontFamily: FONT_BODY, marginBottom: 24, appearance: "none" }}
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code} style={{ background: C.panel, color: C.text }}>{l.native} · {l.name}</option>
+            ))}
+          </select>
           <Button variant="ghost" onClick={signOut} style={{ marginBottom: 30 }}>{t("settingsSignOut")}</Button>
           <div style={{ textAlign: "center", color: C.muted, fontSize: 11, fontFamily: FONT_MONO }}>{t("settingsVersion")}</div>
         </div>
