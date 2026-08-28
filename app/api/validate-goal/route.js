@@ -9,7 +9,7 @@ export async function POST(req) {
 Твоя задача — пропускать почти всё. Отклоняй ТОЛЬКО если цель:
 - явный спам или набор случайных символов (например "asdasdasd", "123123")
 - оскорбительная, содержит нецензурную брань или ненависть
-- откровенно про незаконные/пасные для здоровья действия
+- откровенно про незаконные/опасные для здоровья действия
 
 Любая обычная цель — включая короткие и простые формулировки вроде "читать книги", "качать пресс", "спать больше", "меньше нервничать", "выучить язык" — ВСЕГДА valid=true. Не придирайся к формулировке, не требуй конкретики или деталей. Если сомневаешься — считай valid=true.
 
@@ -32,7 +32,22 @@ export async function POST(req) {
       return Response.json({ valid: true, reason: "" });
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    // Если сам промпт заблокирован фильтром безопасности Gemini (или ответ
+    // остановлен по причине SAFETY) — это почти всегда значит, что цель
+    // содержит недопустимый контент (мат/оскорбления). В этом случае
+    // отклоняем, а не пропускаем "по умолчанию".
+    const candidate = data.candidates?.[0];
+    if (data.promptFeedback?.blockReason || candidate?.finishReason === "SAFETY") {
+      console.warn("validate-goal blocked by safety filter:", data.promptFeedback?.blockReason || candidate?.finishReason);
+      return Response.json({ valid: false, reason: "" });
+    }
+
+    const text = candidate?.content?.parts?.[0]?.text || "";
+    if (!text) {
+      // Пустой ответ без признаков safety-блокировки — считаем техническим
+      // сбоем и пропускаем цель, чтобы не блокировать пользователя зря.
+      return Response.json({ valid: true, reason: "" });
+    }
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
 
