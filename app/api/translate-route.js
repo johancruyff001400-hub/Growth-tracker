@@ -2,7 +2,7 @@ export async function POST(req) {
   const { langName, strings } = await req.json();
   const target = langName || "English";
 
-  const prompt = `Переведи значения этого JSON-объекта с русского на ${target}.
+  const prompt = `Переведи значения этого JSON-объекта с русского на ${target}
 Это тексты интерфейса мобильного приложения-трекера привычек.
 Правила:
 - Ключи оставь БЕЗ ИЗМЕНЕНИЙ, переводи только значения (строки).
