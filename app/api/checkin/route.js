@@ -25,7 +25,16 @@ export async function POST(req) {
       return Response.json({ relevant: true, score: 3, comment: "" });
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const candidate = data.candidates?.[0];
+    if (data.promptFeedback?.blockReason || candidate?.finishReason === "SAFETY") {
+      console.warn("checkin blocked by safety filter:", data.promptFeedback?.blockReason || candidate?.finishReason);
+      return Response.json({ relevant: false, score: 0, comment: "" });
+    }
+
+    const text = candidate?.content?.parts?.[0]?.text || "";
+    if (!text) {
+      return Response.json({ relevant: true, score: 3, comment: "" });
+    }
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
 
